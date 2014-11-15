@@ -55,7 +55,7 @@ grunt.initConfig({
                 src: 'index.html',
                 dest: 'temp/index.html'
             },
-            removeNotUsedAssets: true //will remove hashed assets that was not used anywhere
+            removeNotUsedAssets: true //will remove hashed assets that were not used anywhere
         }
     }
 });

@@ -26,7 +26,8 @@ module.exports = function(grunt) {
         });
 
         var bustMap = [],
-            baseDir = path.resolve(process.cwd(), options.baseDir)
+            baseDir = path.resolve(process.cwd(), options.baseDir),
+            destDir = path.resolve(process.cwd(), options.baseDir)
 
         console.log('Base directory is', baseDir)
 
@@ -218,7 +219,7 @@ module.exports = function(grunt) {
         if (options.removeNotUsedAssets){
             bustMap.filter(function(map){return !map.used}).forEach(function(map){
                 console.log('Remove not used asset', path.relative(baseDir, map.destPath))
-                grunt.file.delete(map.destPath)
+                grunt.file.delete(map.destPath, {force: options.force})
             })
         }
 

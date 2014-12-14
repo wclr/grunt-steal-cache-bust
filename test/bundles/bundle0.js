@@ -1,6 +1,3 @@
-// /*[traceur-runtime]*/
-this._System=...
-/*[production-config]*/
 steal={env: 'production'};
 
 /*[system-bundles-config]*/

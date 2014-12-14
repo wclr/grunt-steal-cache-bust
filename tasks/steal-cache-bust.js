@@ -22,211 +22,214 @@ module.exports = function(grunt) {
         // Merge task-specific and/or target-specific options with these defaults.
         var options = this.options({
             baseDir: '',
-            separator: ', '
+            assetsDir: '',
+            bundlesDir: '',
+            hashes: false,
+            hashesOnly: false,
+            relativeUrls: undefined
         });
 
-        var bustMap = [],
-            baseDir = path.resolve(process.cwd(), options.baseDir),
-            destDir = path.resolve(process.cwd(), options.baseDir)
+        var assetsMap = [],
+            cwd = process.cwd(),
+            baseDir = path.resolve(cwd, options.baseDir),
+            destBaseDir = path.resolve(baseDir, options.destDir),
+            assetsDir = path.resolve(destBaseDir, options.assetsDir)
 
-        console.log('Base directory is', baseDir)
+        var getDestAssetName = function(src, data){
 
-        var makeHashedName = function(fileName, data){
-            var hash = crypto.createHash('md5').update(data).digest('hex'),
-                ext = path.extname(fileName),
-                basename = path.basename(fileName, ext)
+            var fileName = path.basename(src)
 
-            return (options.keepBasename ? basename + '-' : '' ) + hash + ext
-        }
-
-        var mapBustedUrls = function(data){
-
-            var oldData
-
-            try {
-                bustMap.forEach(function(map){
-                    oldData = data
-                    data = data.replace(new RegExp(map['from'], 'g'), map['to'])
-                    if (oldData !== data){
-                        map.used = true
-                    }
-
-                })
-            } catch(e){
-                console.log('stealCacheBust mapUrls error', e.message)
-            }
-
-            return data
-        }
-
-        var addToBustMap = function(paths, urlBase){
-            urlBase = urlBase || {}
-            var srcBase = path.resolve(baseDir, urlBase.src || urlBase[0] || ''),
-                destBase = path.resolve(baseDir, urlBase.dest || urlBase[1] || '')
-
-            //console.log('addToBustMap', urlBase.dest, destBase)
-
-            bustMap.push({
-                srcPath: paths.src,
-                destPath: paths.dest,
-                from: paths.src.slice(srcBase.length).replace(/\\/g, '/'),
-                to: paths.dest.slice(destBase.length).replace(/\\/g, '/')
-            })
-
-        }
-
-        // create hached assets
-        if (options.assets){
-
-            var assets = util.isArray(options.assets) ? options.assets : [options.assets]
-
-            assets.forEach(function(assetsMap){
-
-                var files = grunt.file.expand({cwd: baseDir}, assetsMap.src)
-
-                files.forEach(function(filePath){
-
-                    filePath = path.resolve(baseDir, filePath)
-
-                    var data = grunt.file.read(filePath, {encoding: null})
-
-
-                    var fileName = path.basename(filePath),
-                        hashedName = makeHashedName(fileName, data),
-                        destPath = path.resolve(baseDir, assetsMap.dest, hashedName)
-
-                    console.log('Saving hashed asset file', path.relative(baseDir, destPath))
-
-                    grunt.file.write(destPath, data)
-
-                    if (assetsMap.remove){
-                        grunt.file.delete(filePath)
-                    }
-
-                    addToBustMap({src: filePath, dest: destPath}, assetsMap.urlBase)
-
-                })
-            })
-        }
-
-
-        if (options.bundles){
-
-            var bundlesPath = options.bundles.path,
-                fullBundlesPath = path.resolve(baseDir, bundlesPath)
-
-
-
-            var bundleFiles = grunt.file.expand(fullBundlesPath + '/*')
-
-            var bundles = bundleFiles.map(function(bundleFile){
-                var fileName = path.basename(bundleFile)
-                //console.log('Loading bundle file', path.relative(baseDir, bundleFile))
-                return {
-                    name: fileName.replace(/\.js$/, ''),
-                    fileName: fileName,
-                    ext: path.extname(fileName).slice(1),
-                    path: bundleFile,
-                    source: grunt.file.read(bundleFile)
-                }
-            })
-
-            // no bundles.main option
-            var mainBundleName
-            if (!options.bundles.main){
-                var jsBundles = bundles.filter(function(b){return b.ext == 'js'})
-                if (jsBundles.length[0]){
-                    mainBundleName = jsBundles[0].name
-                }
+            if (options.hashes || options.hashesOnly){
+                var hash = crypto.createHash('md5').update(data).digest('hex'),
+                    ext = path.extname(fileName),
+                    basename = path.basename(fileName, ext)
+                return (options.hashesOnly ? '' : basename + '-' ) + hash + ext
             } else {
-                mainBundleName = path.basename(options.bundles.main)
+                return fileName
             }
 
-            var mainBundle = bundles.filter(function(b){return b.name == mainBundleName})[0]
-
-            if (!mainBundle){
-                console.log('Could not find main bundle', mainBundleName)
-                return
-            }
+        }
 
 
-            // remove main bundle from bundles
-            bundles.splice(bundles.indexOf(mainBundle), 1)
+        var urlRegExps = [
+            /url\s*\(\s*["|']?\s*([^'"]*?\.[\w\d]{2,4})\s*["|']?\s*\)/,
+            /(?:url\:|\.get|\.ajax|System\.import)\s*\([^'"]*["|']\s*([^'"\)]*?)\s*["|']/,
+            /<(?:img|script).*?src=\s*["|']\s*([^'"]*?)\s*["|']/,
+            /<(?:link).*?href=\s*["|']\s*([^'"]*?)\s*["|']/,
+            /<script.*?(?:data-)?main=\s*["|']\s*([^'"]*?)\s*["|']/, // steal bundle
+            ///<meta.*?content=\s*["|']\s*([^'"]*?\.[\w\d]{2,4})\s*["|']/,
+            //'url\\s*\\(\\s*["|\']?\\s*([^\'"]*?\\.[\\w\\d]{2,4})\\s*["|\']?\\s*\\)' +
+        ]
 
-
-            var saveHashedBundleFile = function(filePath, source){
-                var name = makeHashedName(filePath, source)
-                var savePath = path.resolve(baseDir, options.bundles.dest, name)
-                console.log('Saving bundle file', path.relative(baseDir, savePath))
-                grunt.file.write(savePath, source)
-                return savePath
-            }
-
-            // compose paths that we should add to main bundle System.paths
-            var pathsStr = bundles.map(function(bundle){
-
-                var ext = path.extname(bundle.name).slice(1)
-
-                if (ext == 'css'){
-                    bundle.source = mapBustedUrls(bundle.source)
+        var findUrls = function(data){
+            var urls = []
+            urlRegExps.forEach(function(regEx){
+                var match = data.match(new RegExp(regEx.source,'g'))
+                if (match){
+                    urls = urls.concat(match.map(function(url){
+                        return url.match(regEx)[1]
+                    }))
                 }
+            })
 
-                var hashedName = path.basename(saveHashedBundleFile(bundle.path, bundle.source))
+            if (options.urls && options.urls.forEach){
+                options.urls.forEach(function(url){
+                    //console.log('options urls checking', url)
+                    if (typeof url == 'string'){
+                        url = new RegExp(url)
+                    }
 
-                if (options.bundles.remove){
-                    grunt.file.delete(bundle.path)
+                    if (url instanceof RegExp){
+                        var match = data.match(new RegExp(url.source,'g')) || []
+                        urls = urls.concat(match)
+                    }
+                })
+            }
+
+            //console.log('findUrls', urls)
+            return urls
+        }
+
+        var isMainBundle = function(data){
+            return /System\.bundles/.test(data)
+        }
+
+        var processBundle = function(srcPath, data){
+
+            var bundleFiles = grunt.file.expand(path.dirname(srcPath) + '/*')
+
+
+            var bundleMap = []
+
+            bundleFiles.forEach(function(bundleFile){
+                if (path.normalize(bundleFile) !== path.normalize(srcPath)){
+                    //console.log('processBundle file', bundleFile)
+                    var extname = path.extname(bundleFile).slice(1)
+                    if (extname === 'js'){extname = ''}
+
+                    var destBundleFile = processAssetFile(bundleFile)
+
+                    // need to add extension css to mapped path to get: app.csscss
+                    bundleMap.push({
+                        name: path.basename(bundleFile, '.js'),
+                        url: getUrl(destBundleFile, assetsDir) + extname
+                    })
                 }
+            })
 
-                // for css we should append just "css": "/dist/app.csscss";'
-
-                var bundlePath = options.bundles.bustedPath || ''
-
-                // add slash in the end of the path
-                bundlePath && (bundlePath = bundlePath.replace(/\/$/, '') + '/')
-
+            var configStr = bundleMap.map(function(bundle){
                 return 'System.paths["bundles/' + bundle.name +'"] = "'
-                    + bundlePath + hashedName + ext +'";'
-
+                + bundle.url +'";'
             }).join('\n')
 
-            if (options.bundles.removeTraceur){
-                // remove traceur-runtime
-                mainBundle.source = mainBundle.source.replace(/\/\*\[traceur-runtime\]\*\/[\s\S]*?\n(\/\*)/, '$1')
+            return data.replace(/System\.paths\["bundles\/.*?\n/g, '')
+                // add paths to hashed files
+                .replace(/(\nSystem\.bundles =)/, '\n' + configStr + '$1')
+
+        }
+
+        var lookForUrlsIn = ['.css', '.html', '.js']
+
+        var getUrl = function(urlPath, relativeTo){
+            if (options.relativeUrls === false){
+                relativeTo = false
             }
 
-            if (options.bundles.loadCssUsingStyleTag){
-                mainBundle.source = mainBundle.source.replace(/(define\("\$css.*?)production/, '$1')
+            var url = (relativeTo
+                ? path.relative(relativeTo, urlPath)
+                : '/' + path.relative(destBaseDir, urlPath)
+            ).replace(/\\/g, '/')
+
+            //console.log('getUrl', urlPath, url)
+
+            return url
+        }
+
+        var processAssetFile = function(srcPath, destPath){
+            // resolve source path (removing absolute url slash)
+            var srcDir = path.dirname(srcPath),
+                extname = path.extname(srcPath)
+
+            //console.log('processAssetFile', src)
+            if (assetsMap[srcPath] === ''){
+                console.log('Possible cyclic dependency', srcPath)
+                return ''
             }
 
-            if (pathsStr){
-                mainBundle.source = mainBundle.source
-                    //remove old bundles paths
-                    .replace(/System\.paths\["bundles\/.*?\n/g, '')
-                    // add paths to hashed files
-                    .replace(/(\nSystem\.bundles =)/, '\n' + pathsStr + '$1')
+            if (assetsMap[srcPath] === undefined){
+                if (!grunt.file.exists(srcPath) || grunt.file.isDir(srcPath)){
+                    console.log('File', srcPath, 'does not exist.')
+                    return ''
+                }
+                //console.log('foundUrls', foundUrls)
+                var lookForUrls = lookForUrlsIn.indexOf(extname) >= 0
+
+                var srcData = grunt.file.read(srcPath, lookForUrls ? {} : {encoding: null} )
+
+
+                // no forced relative urls for js
+                var relativeUrls = (extname !== '.js' && options.relativeUrls)
+
+                assetsMap[srcPath] == ''
+                // find all urs in file
+                if (lookForUrls){
+                    var foundUrls = findUrls(srcData)
+                    var urlsMap = []
+
+                    var destDir = destPath ? path.dirname(destPath) : assetsDir
+
+                    foundUrls.forEach(function(url){
+                        if (!url) return
+                        // get source file path
+                        // if relative then resolve relative to current source
+                        // if absolute path resolve relative to baseDir
+                        var relative = url[0] !== '/',
+                            filePath = relative ?
+                                path.resolve(srcDir, url) :
+                                path.resolve(baseDir, url.slice(1))
+                        // get dest path
+                        var destPath = processAssetFile(filePath)
+                        if (destPath){
+                            urlsMap.push({
+                                src: url,
+                                dest: getUrl(destPath, (relativeUrls || relative) && destDir)
+                            })
+                        }
+                    })
+                    urlsMap.forEach(function(map){
+                        srcData = srcData.replace(new RegExp(map.src, 'g'), map.dest)
+                    })
+                }
+
+                if (extname == '.js' && isMainBundle(srcData)){
+                    srcData = processBundle(srcPath, srcData)
+                }
+
+                destPath = destPath || path.resolve(assetsDir, getDestAssetName(srcPath, srcData))
+
+                assetsMap[srcPath] = destPath
+
+                console.log('writing file', path.relative(destBaseDir, destPath))
+                grunt.file.write(destPath, srcData)
+
+                // replace urls and save file
             }
 
-            var mainBundleHashed = saveHashedBundleFile(mainBundle.path, mainBundle.source)
-
-            addToBustMap({src: mainBundle.path, dest: mainBundleHashed}, options.bundles.urlBase)
+            return assetsMap[srcPath]
         }
 
         if (options.index){
-            var indexHtml = grunt.file.read(path.resolve(baseDir, options.index.src))
-            grunt.file.write(path.resolve(baseDir, options.index.dest), mapBustedUrls(indexHtml))
+            var srcPath =  path.resolve(baseDir, options.index.src || options.index),
+                destPath = path.resolve(destBaseDir, options.index.dest || 'index.html')
+            processAssetFile(srcPath, destPath)
         }
 
-        if (options.removeNotUsedAssets){
-            bustMap.filter(function(map){return !map.used}).forEach(function(map){
-                console.log('Remove not used asset', path.relative(baseDir, map.destPath))
-                grunt.file.delete(map.destPath, {force: options.force})
-            })
+        if (options.bundle){
+            processAssetFile(path.resolve(baseDir, options.bundle))
         }
 
     }
 
     grunt.registerMultiTask('stealCacheBust', 'Steal bundles and assets cache busting plugin.', taskFunc);
-
-    grunt.registerMultiTask('steal_cache_bust', 'Steal bundles and assets cache busting plugin.', taskFunc);
 
 };

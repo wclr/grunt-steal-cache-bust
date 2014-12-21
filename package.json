@@ -1,7 +1,7 @@
 {
   "name": "grunt-steal-cache-bust",
   "description": "Steal bundles and assets cache busting plugin.",
-  "version": "0.0.2",
+  "version": "0.2.0",
   "homepage": "https://github.com/whitecolor/grunt-steal-cache-bust",
   "author": {
     "name": "Alex Oshchepkov",

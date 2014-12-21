@@ -158,7 +158,7 @@ module.exports = function(grunt) {
 
             if (assetsMap[srcPath] === undefined){
                 if (!grunt.file.exists(srcPath) || grunt.file.isDir(srcPath)){
-                    console.log('File', srcPath, 'does not exist.')
+                    //console.log('File', srcPath, 'does not exist.')
                     return ''
                 }
                 //console.log('foundUrls', foundUrls)
